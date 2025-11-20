@@ -1,11 +1,7 @@
 # server.py
 # --------------------------------------------------------------------
-# PURE RELAY CHAT SERVER with reliable resend protocol.
-# - NEVER corrupts __CRC_ERROR__ replies
-# - Client always receives resend request correctly
-# - Client always resends correctly
-# - Server broadcasts clean messages only
-# - Join/leave announcements sent to ALL clients including newcomer
+# RELAY CHAT SERVER with CRC-based automatic resend PLUS
+# global broadcast when a corrupted message is received.
 # --------------------------------------------------------------------
 
 import socket
@@ -30,6 +26,9 @@ def recv_all(sock, n):
     return buf
 
 
+# =====================================================================
+# GUI HANDLER
+# =====================================================================
 class ServerGUI:
     def __init__(self, root):
         self.root = root
@@ -38,19 +37,21 @@ class ServerGUI:
         frame = ttk.Frame(root, padding=8)
         frame.pack(fill=tk.BOTH, expand=True)
 
+        # LEFT LOG WINDOW
         left = ttk.Frame(frame)
         left.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         ttk.Label(left, text="Server Log").pack(anchor=tk.W)
         self.log = scrolledtext.ScrolledText(left, state="disabled", height=20)
         self.log.pack(fill=tk.BOTH, expand=True)
 
+        # RIGHT CLIENT LIST
         right = ttk.Frame(frame)
         right.pack(side=tk.RIGHT, fill=tk.Y)
         ttk.Label(right, text="Connected Clients").pack(anchor=tk.W)
         self.clients_list = tk.Listbox(right, height=12)
         self.clients_list.pack(fill=tk.X)
 
-        self.clients = {}
+        self.clients = {}                   # socket → name
         self.clients_lock = threading.Lock()
         self.queue = queue.Queue()
 
@@ -62,6 +63,7 @@ class ServerGUI:
         self.log.yview(tk.END)
         self.log.config(state="disabled")
 
+    # Queue processor
     def process_queue(self):
         while not self.queue.empty():
             event, data = self.queue.get()
@@ -82,8 +84,8 @@ class ServerGUI:
                     name = self.clients.pop(sock, None)
                 if name:
                     try:
-                        i = self.clients_list.get(0, tk.END).index(name)
-                        self.clients_list.delete(i)
+                        idx = self.clients_list.get(0, tk.END).index(name)
+                        self.clients_list.delete(idx)
                     except:
                         pass
                     self.log_msg(f"{name} disconnected.")
@@ -93,6 +95,7 @@ class ServerGUI:
 
         self.root.after(100, self.process_queue)
 
+    # Broadcast helper
     def broadcast(self, text):
         packet = make_packet(text)
         with self.clients_lock:
@@ -105,25 +108,29 @@ class ServerGUI:
 
 
 # =====================================================================
-
+# PER-CLIENT THREAD
+# =====================================================================
 def client_thread(sock, addr, gui: ServerGUI):
     try:
-        # Receive name
+        # Receive client's name
         header = recv_all(sock, 4)
         if not header:
             return
         (length,) = struct.unpack("!I", header)
         packet = recv_all(sock, length)
-        valid, name = verify_and_extract(packet)
 
+        valid, name = verify_and_extract(packet)
         if not valid:
             name = "Unknown"
 
         gui.queue.put(("add_client", (sock, name)))
+
+        # Announce join
         gui.queue.put(("broadcast", f"{name} has entered the chat. Welcome!"))
 
         last_request_resend = False
 
+        # Main loop
         while True:
             header = recv_all(sock, 4)
             if not header:
@@ -136,11 +143,18 @@ def client_thread(sock, addr, gui: ServerGUI):
 
             valid, text = verify_and_extract(packet)
 
-            # Bad message → request resend
+            # ---------------------------------------------------------
+            # CASE 1 — CORRUPTED MESSAGE
+            # ---------------------------------------------------------
             if not valid:
-                gui.queue.put(("log", f"Corrupted message from {name}, requesting resend."))
+                gui.queue.put(("log", f"Corrupted message from {name}."))
 
-                error_packet = make_packet(ERROR_TOKEN)   # NEVER corrupted
+                # NEW FEATURE: Broadcast corruption notice
+                gui.queue.put(("broadcast",
+                               f"[Server Notice] Received a corrupted message from {name}."))
+
+                # Ask client to resend (ERROR_TOKEN never corrupted)
+                error_packet = make_packet(ERROR_TOKEN)
                 try:
                     sock.sendall(struct.pack("!I", len(error_packet)) + error_packet)
                 except:
@@ -153,14 +167,17 @@ def client_thread(sock, addr, gui: ServerGUI):
             if text == ERROR_TOKEN:
                 continue
 
-            # Clean message received
+            # ---------------------------------------------------------
+            # CASE 2 — CLEAN MESSAGE RECEIVED
+            # ---------------------------------------------------------
             if last_request_resend:
-                gui.queue.put(("log", f"{name} resent successfully."))
+                gui.queue.put(("log", f"{name} resent message successfully."))
                 last_request_resend = False
 
             gui.queue.put(("broadcast", f"{name} → {text}"))
 
     finally:
+        # Disconnect handling
         try:
             sock.close()
         except:
@@ -168,6 +185,7 @@ def client_thread(sock, addr, gui: ServerGUI):
 
         gui.queue.put(("remove_client", sock))
 
+        # Announce leave
         with gui.clients_lock:
             name = gui.clients.get(sock, "Unknown")
 
@@ -175,7 +193,8 @@ def client_thread(sock, addr, gui: ServerGUI):
 
 
 # =====================================================================
-
+# ACCEPT LOOP
+# =====================================================================
 def accept_loop(server_sock, gui):
     while True:
         c, addr = server_sock.accept()
