@@ -1,43 +1,62 @@
 # crc.py
-# CRC-8 (polynomial 0x07) implementation for bytes
+# --------------------------------------------------------------------
+# CRC-3 using G(x) = x^3 + x + 1
+# Includes 10% corruption simulation for NORMAL CHAT MESSAGES ONLY.
+# __CRC_ERROR__ packets are NEVER corrupted to prevent protocol stalls.
+# --------------------------------------------------------------------
 
-def compute_crc8(data: bytes, poly: int = 0x07, init: int = 0x00) -> int:
-    """
-    Compute CRC-8 over the given bytes.
-    Default polynomial: 0x07 (x^8 + x^2 + x + 1)
-    Returns integer 0-255
-    """
-    crc = init
+import random
+
+POLY = 0b1011
+CORRUPTION_CHANCE = 0.10
+ERROR_TOKEN = "__CRC_ERROR__"
+
+
+def compute_crc3(data: bytes, init=0):
+    crc = init & 0b111
     for b in data:
-        crc ^= b
-        for _ in range(8):
-            if crc & 0x80:
-                crc = ((crc << 1) & 0xFF) ^ poly
-            else:
-                crc = (crc << 1) & 0xFF
-    return crc
+        for i in range(8):
+            bit = (b >> (7 - i)) & 1
+            top = (crc >> 2) & 1
+            crc = ((crc << 1) & 0b111) | bit
+            if top:
+                crc ^= (POLY & 0b111)
+    return crc & 0b111
 
-def make_packet(payload_text: str) -> bytes:
-    """
-    Create payload bytes (utf-8) + crc byte appended.
-    Returns the bytes to be placed after length prefix.
-    """
-    payload = payload_text.encode('utf-8')
-    crc = compute_crc8(payload)
-    return payload + bytes([crc])
 
-def verify_and_extract(packet: bytes) -> tuple[bool, str]:
-    """
-    Given payload+crc bytes, verify CRC and return (valid, text).
-    If not valid, text contains the decoded payload (best effort) or ''.
-    """
+def maybe_corrupt(packet: bytes, text: str) -> bytes:
+    """Corrupt only NORMAL MESSAGES. NEVER corrupt ERROR_TOKEN."""
+    if text == ERROR_TOKEN:
+        return packet  # NEVER corrupt control packets
+
+    if random.random() < CORRUPTION_CHANCE and len(packet) > 0:
+        idx = random.randrange(len(packet))
+        bit = 1 << random.randrange(8)
+        corrupted = bytearray(packet)
+        corrupted[idx] ^= bit
+        return bytes(corrupted)
+
+    return packet
+
+
+def make_packet(text: str) -> bytes:
+    payload = text.encode("utf-8")
+    crc = compute_crc3(payload)
+    packet = payload + bytes([crc])
+    return maybe_corrupt(packet, text)
+
+
+def verify_and_extract(packet: bytes):
     if len(packet) == 0:
-        return False, ''
+        return False, ""
+
     data = packet[:-1]
     recv_crc = packet[-1]
-    calc_crc = compute_crc8(data)
+    calc_crc = compute_crc3(data)
+
     try:
-        text = data.decode('utf-8', errors='replace')
+        text = data.decode("utf-8", errors="replace")
     except:
-        text = ''
-    return (calc_crc == recv_crc, text)
+        text = ""
+
+    return (calc_crc == recv_crc), text
