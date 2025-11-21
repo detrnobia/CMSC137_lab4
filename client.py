@@ -9,12 +9,12 @@ import struct
 import threading
 import tkinter as tk
 from tkinter import ttk, scrolledtext, messagebox
-from crc import make_packet, verify_and_extract, compute_crc3, ERROR_TOKEN
+from crc import makePacket, verifyPacket, computeCRC, ERROR_TOKEN
 
 SERVER_PORT = 1234
 
 
-def get_local_ip():
+def getLocalIP():
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.settimeout(0.5)
@@ -29,7 +29,7 @@ def get_local_ip():
         except Exception:
             return "127.0.0.1"
 
-def recv_all(sock, n):
+def receiveAll(sock, n):
     buf = b""
     while len(buf) < n:
         part = sock.recv(n - len(buf))
@@ -103,7 +103,7 @@ class ClientGUI:
             self.sock.connect((ip, SERVER_PORT))
 
             payload = name.encode("utf-8")
-            crc = compute_crc3(payload)
+            crc = computeCRC(payload)
             packet = payload + bytes([crc])
             self.sock.sendall(struct.pack("!I", len(packet)) + packet)
 
@@ -117,8 +117,8 @@ class ClientGUI:
             messagebox.showerror("Connection Error", str(e))
 
     # --------------------------------------------------------------
-    def detect_local_ip(self):
-        ip = get_local_ip()
+    def detectLocalIP(self):
+        ip = getLocalIP()
         self.ip_entry.delete(0, tk.END)
         self.ip_entry.insert(0, ip)
         # use log if you want user feedback
@@ -127,7 +127,7 @@ class ClientGUI:
         except:
             pass
         
-    def send_message(self):
+    def sendMessage(self):
         if not self.connected:
             return
 
@@ -136,7 +136,7 @@ class ClientGUI:
             return
 
         try:
-            packet = make_packet(text)
+            packet = makePacket(text)
             self.sock.sendall(struct.pack("!I", len(packet)) + packet)
             self.last_message = text
             self.msg_entry.delete(0, tk.END)
@@ -145,24 +145,24 @@ class ClientGUI:
 
     # --------------------------------------------------------------
 
-    def recv_loop(self):
+    def receiveMessageLoop(self):
         try:
             while True:
-                header = recv_all(self.sock, 4)
+                header = receiveAll(self.sock, 4)
                 if not header:
                     break
 
                 (length,) = struct.unpack("!I", header)
-                packet = recv_all(self.sock, length)
+                packet = receiveAll(self.sock, length)
                 if not packet:
                     break
 
-                valid, text = verify_and_extract(packet)
+                valid, text = verifyPacket(packet)
 
                 # Server requests resend
                 if valid and text == ERROR_TOKEN:
                     if self.last_message:
-                        packet = make_packet(self.last_message)
+                        packet = makePacket(self.last_message)
                         self.sock.sendall(struct.pack("!I", len(packet)) + packet)
                     continue
 

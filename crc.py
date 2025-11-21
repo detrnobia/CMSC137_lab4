@@ -12,7 +12,7 @@ CORRUPTION_CHANCE = 0.10
 ERROR_TOKEN = "__CRC_ERROR__"
 
 
-def compute_crc3(data: bytes, init=0):
+def computeCRC(data: bytes, init=0):
     crc = init & 0b111
     for b in data:
         for i in range(8):
@@ -24,7 +24,7 @@ def compute_crc3(data: bytes, init=0):
     return crc & 0b111
 
 
-def maybe_corrupt(packet: bytes, text: str) -> bytes:
+def randomCorrupt(packet: bytes, text: str) -> bytes:
     """Corrupt only NORMAL MESSAGES. NEVER corrupt ERROR_TOKEN."""
     if text == ERROR_TOKEN:
         return packet  # NEVER corrupt control packets
@@ -39,20 +39,20 @@ def maybe_corrupt(packet: bytes, text: str) -> bytes:
     return packet
 
 
-def make_packet(text: str) -> bytes:
+def makePacket(text: str) -> bytes:
     payload = text.encode("utf-8")
-    crc = compute_crc3(payload)
+    crc = computeCRC(payload)
     packet = payload + bytes([crc])
-    return maybe_corrupt(packet, text)
+    return randomCorrupt(packet, text)
 
 
-def verify_and_extract(packet: bytes):
+def verifyPacket(packet: bytes):
     if len(packet) == 0:
         return False, ""
 
     data = packet[:-1]
     recv_crc = packet[-1]
-    calc_crc = compute_crc3(data)
+    calc_crc = computeCRC(data)
 
     try:
         text = data.decode("utf-8", errors="replace")

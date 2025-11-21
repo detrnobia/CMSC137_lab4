@@ -15,7 +15,7 @@ import struct
 import queue
 import tkinter as tk
 from tkinter import ttk, scrolledtext
-from crc import make_packet, verify_and_extract, ERROR_TOKEN
+from crc import makePacket, verifyPacket, ERROR_TOKEN
 
 HOST = "0.0.0.0"
 PORT = 1234
@@ -137,7 +137,7 @@ class ServerGUI:
     # -----------------------------------------------------------
     def broadcast(self, text):
         """Broadcast message to all clients."""
-        packet = make_packet(text)
+        packet = makePacket(text)
 
         with self.clients_lock:
             items = list(self.clients.items())
@@ -163,7 +163,7 @@ def client_thread(sock, addr, gui: ServerGUI):
         (length,) = struct.unpack("!I", header)
         packet = recv_all(sock, length)
 
-        valid, name = verify_and_extract(packet)
+        valid, name = verifyPacket(packet)
         if not valid:
             name = "Unknown"
 
@@ -188,7 +188,7 @@ def client_thread(sock, addr, gui: ServerGUI):
             if not packet:
                 break
 
-            valid, text = verify_and_extract(packet)
+            valid, text = verifyPacket(packet)
 
             # -----------------------------------------
             # CORRUPTED MESSAGE
@@ -200,7 +200,7 @@ def client_thread(sock, addr, gui: ServerGUI):
                                f"[Server Notice] Received a corrupted message from {name}. Resend requested."))
 
                 # Ask sender to resend
-                err = make_packet(ERROR_TOKEN)
+                err = makePacket(ERROR_TOKEN)
                 try:
                     sock.sendall(struct.pack("!I", len(err)) + err)
                 except:
