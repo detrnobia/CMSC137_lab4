@@ -50,9 +50,9 @@ class ClientGUI:
         ttk.Label(top, text="Server IP:").pack(side=tk.LEFT)
         self.ip_entry = ttk.Entry(top, width=15)
         self.ip_entry.pack(side=tk.LEFT)
-        self.ip_entry.insert(0, get_local_ip())
+        self.ip_entry.insert(0, getLocalIP())
 
-        detect_btn = ttk.Button(top, text="Detect", command=self.detect_local_ip)
+        detect_btn = ttk.Button(top, text="Detect", command=self.detectLocalIP)
         detect_btn.pack(side=tk.LEFT, padx=(6,0))
 
         ttk.Label(top, text="Name:").pack(side=tk.LEFT, padx=(10, 2))
@@ -71,7 +71,7 @@ class ClientGUI:
         self.msg_entry = ttk.Entry(bottom)
         self.msg_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
-        self.send_btn = ttk.Button(bottom, text="Send", command=self.send_message, state="disabled")
+        self.send_btn = ttk.Button(bottom, text="Send", command=self.sendMessage, state="disabled")
         self.send_btn.pack(side=tk.LEFT, padx=4)
 
         self.sock = None
@@ -111,7 +111,7 @@ class ClientGUI:
             self.connect_btn.config(state="disabled")
             self.send_btn.config(state="normal")
 
-            threading.Thread(target=self.recv_loop, daemon=True).start()
+            threading.Thread(target=self.receiveMessageLoop, daemon=True).start()
 
         except Exception as e:
             messagebox.showerror("Connection Error", str(e))

@@ -21,7 +21,7 @@ def computeCRC(data: bytes, init=0):
             crc = ((crc << 1) & 0b111) | bit
             if top:
                 crc ^= (POLY & 0b111)
-    return crc & 0b111
+    return crc & 0b111 
 
 
 def randomCorrupt(packet: bytes, text: str) -> bytes:
