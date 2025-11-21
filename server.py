@@ -1,7 +1,12 @@
 # server.py
 # --------------------------------------------------------------------
-# RELAY CHAT SERVER with CRC-based automatic resend PLUS
-# global broadcast when a corrupted message is received.
+# RELAY CHAT SERVER with:
+#  - Server can chat
+#  - Server sees all client chats
+#  - Client chats appear in server log
+#  - Join/leave announcements
+#  - CRC-based automatic resend
+#  - Broadcast corruption notices
 # --------------------------------------------------------------------
 
 import socket
@@ -17,6 +22,7 @@ PORT = 1234
 
 
 def recv_all(sock, n):
+    """Receive exactly n bytes from socket."""
     buf = b""
     while len(buf) < n:
         part = sock.recv(n - len(buf))
@@ -32,15 +38,15 @@ def recv_all(sock, n):
 class ServerGUI:
     def __init__(self, root):
         self.root = root
-        root.title("Server Monitor")
+        root.title("Server Chat")
 
         frame = ttk.Frame(root, padding=8)
         frame.pack(fill=tk.BOTH, expand=True)
 
-        # LEFT LOG WINDOW
+        # LEFT LOG WINDOW (server chat + client chat + notices)
         left = ttk.Frame(frame)
         left.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        ttk.Label(left, text="Server Log").pack(anchor=tk.W)
+        ttk.Label(left, text="Chat Log").pack(anchor=tk.W)
         self.log = scrolledtext.ScrolledText(left, state="disabled", height=20)
         self.log.pack(fill=tk.BOTH, expand=True)
 
@@ -51,55 +57,91 @@ class ServerGUI:
         self.clients_list = tk.Listbox(right, height=12)
         self.clients_list.pack(fill=tk.X)
 
-        self.clients = {}                   # socket → name
+        # SERVER SEND MESSAGE UI
+        bottom = ttk.Frame(root, padding=8)
+        bottom.pack(fill=tk.X)
+
+        self.server_msg = ttk.Entry(bottom)
+        self.server_msg.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        send_btn = ttk.Button(bottom, text="Send", command=self.send_server_message)
+        send_btn.pack(side=tk.LEFT, padx=6)
+
+        # State: clients + queue
+        self.clients = {}
         self.clients_lock = threading.Lock()
         self.queue = queue.Queue()
 
+        # Begin queue processor
         self.root.after(100, self.process_queue)
 
-    def log_msg(self, t):
+    # -----------------------------------------------------------
+    def log_msg(self, text):
+        """Display text in server log/chat window."""
         self.log.config(state="normal")
-        self.log.insert(tk.END, t + "\n")
+        self.log.insert(tk.END, text + "\n")
         self.log.yview(tk.END)
         self.log.config(state="disabled")
 
-    # Queue processor
+    # -----------------------------------------------------------
+    def send_server_message(self):
+        """Server sends a chat message."""
+        msg = self.server_msg.get().strip()
+        if msg == "":
+            return
+
+        formatted = f"[Server] {msg}"
+        self.log_msg(formatted)          # <-- display server chat locally
+        self.broadcast(formatted)        # <-- send to all clients
+        self.server_msg.delete(0, tk.END)
+
+    # -----------------------------------------------------------
     def process_queue(self):
+        """Handle queued events from client threads."""
         while not self.queue.empty():
             event, data = self.queue.get()
 
             if event == "log":
                 self.log_msg(data)
 
+            elif event == "client_chat":
+                # NEW FEATURE
+                # Show client chat messages in server chat window!
+                self.log_msg(data)
+
+            elif event == "broadcast":
+                self.broadcast(data)
+
             elif event == "add_client":
                 sock, name = data
                 with self.clients_lock:
                     self.clients[sock] = name
                 self.clients_list.insert(tk.END, name)
-                self.log_msg(f"{name} connected.")
+                self.log_msg(f"[Server Notice] {name} connected.")
 
             elif event == "remove_client":
                 sock = data
                 with self.clients_lock:
                     name = self.clients.pop(sock, None)
+
                 if name:
                     try:
                         idx = self.clients_list.get(0, tk.END).index(name)
                         self.clients_list.delete(idx)
                     except:
                         pass
-                    self.log_msg(f"{name} disconnected.")
-
-            elif event == "broadcast":
-                self.broadcast(data)
+                    self.log_msg(f"[Server Notice] {name} disconnected.")
 
         self.root.after(100, self.process_queue)
 
-    # Broadcast helper
+    # -----------------------------------------------------------
     def broadcast(self, text):
+        """Broadcast message to all clients."""
         packet = make_packet(text)
+
         with self.clients_lock:
             items = list(self.clients.items())
+
         for sock, _ in items:
             try:
                 sock.sendall(struct.pack("!I", len(packet)) + packet)
@@ -111,11 +153,13 @@ class ServerGUI:
 # PER-CLIENT THREAD
 # =====================================================================
 def client_thread(sock, addr, gui: ServerGUI):
+
     try:
-        # Receive client's name
+        # Receive client's NAME
         header = recv_all(sock, 4)
         if not header:
             return
+
         (length,) = struct.unpack("!I", header)
         packet = recv_all(sock, length)
 
@@ -125,12 +169,15 @@ def client_thread(sock, addr, gui: ServerGUI):
 
         gui.queue.put(("add_client", (sock, name)))
 
-        # Announce join
+        # Broadcast enter
         gui.queue.put(("broadcast", f"{name} has entered the chat. Welcome!"))
+
+        # Show enter in server GUI
+        gui.queue.put(("client_chat", f"{name} has entered the chat. Welcome!"))
 
         last_request_resend = False
 
-        # Main loop
+        # MAIN LOOP
         while True:
             header = recv_all(sock, 4)
             if not header:
@@ -143,41 +190,44 @@ def client_thread(sock, addr, gui: ServerGUI):
 
             valid, text = verify_and_extract(packet)
 
-            # ---------------------------------------------------------
-            # CASE 1 — CORRUPTED MESSAGE
-            # ---------------------------------------------------------
+            # -----------------------------------------
+            # CORRUPTED MESSAGE
+            # -----------------------------------------
             if not valid:
-                gui.queue.put(("log", f"Corrupted message from {name}."))
+                gui.queue.put(("log", f"[Server Notice] Corrupted message from {name}"))
 
-                # NEW FEATURE: Broadcast corruption notice
                 gui.queue.put(("broadcast",
                                f"[Server Notice] Received a corrupted message from {name}. Resend requested."))
 
-                # Ask client to resend (ERROR_TOKEN never corrupted)
-                error_packet = make_packet(ERROR_TOKEN)
+                # Ask sender to resend
+                err = make_packet(ERROR_TOKEN)
                 try:
-                    sock.sendall(struct.pack("!I", len(error_packet)) + error_packet)
+                    sock.sendall(struct.pack("!I", len(err)) + err)
                 except:
                     pass
 
                 last_request_resend = True
                 continue
 
-            # Ignore ERROR_TOKEN echoes
+            # Ignore ERROR_TOKEN
             if text == ERROR_TOKEN:
                 continue
 
-            # ---------------------------------------------------------
-            # CASE 2 — CLEAN MESSAGE RECEIVED
-            # ---------------------------------------------------------
+            # -----------------------------------------
+            # CLEAN MESSAGE
+            # -----------------------------------------
             if last_request_resend:
-                gui.queue.put(("log", f"{name} resent message successfully."))
+                gui.queue.put(("log", f"{name} resent successfully."))
                 last_request_resend = False
 
-            gui.queue.put(("broadcast", f"{name} → {text}"))
+            formatted = f"{name} → {text}"
+
+            # NEW FEATURE: show client chat message in server GUI
+            gui.queue.put(("client_chat", formatted))
+
+            gui.queue.put(("broadcast", formatted))
 
     finally:
-        # Disconnect handling
         try:
             sock.close()
         except:
@@ -185,20 +235,18 @@ def client_thread(sock, addr, gui: ServerGUI):
 
         gui.queue.put(("remove_client", sock))
 
-        # Announce leave
         with gui.clients_lock:
             name = gui.clients.get(sock, "Unknown")
 
         gui.queue.put(("broadcast", f"{name} has left the chat."))
+        gui.queue.put(("client_chat", f"{name} has left the chat."))
 
 
-# =====================================================================
-# ACCEPT LOOP
 # =====================================================================
 def accept_loop(server_sock, gui):
     while True:
-        c, addr = server_sock.accept()
-        threading.Thread(target=client_thread, args=(c, addr, gui), daemon=True).start()
+        client, addr = server_sock.accept()
+        threading.Thread(target=client_thread, args=(client, addr, gui), daemon=True).start()
 
 
 def main():
@@ -209,7 +257,7 @@ def main():
 
     root = tk.Tk()
     gui = ServerGUI(root)
-    gui.log_msg(f"Server running on {HOST}:{PORT}")
+    gui.log_msg(f"[Server Notice] Server running on {HOST}:{PORT}")
 
     threading.Thread(target=accept_loop, args=(srv, gui), daemon=True).start()
     root.mainloop()
