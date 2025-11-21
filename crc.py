@@ -1,6 +1,6 @@
 import random
 
-POLY = 0b1011
+FUNCTION = 0b1011
 CORRUPTION_CHANCE = 0.10
 ERROR_TOKEN = "__CRC_ERROR__"
 
@@ -13,7 +13,7 @@ def computeCRC(data: bytes, init=0):
             top = (crc >> 2) & 1
             crc = ((crc << 1) & 0b111) | bit
             if top:
-                crc ^= (POLY & 0b111)
+                crc ^= (FUNCTION & 0b111)
     return crc & 0b111 
 
 
