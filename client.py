@@ -9,10 +9,25 @@ import struct
 import threading
 import tkinter as tk
 from tkinter import ttk, scrolledtext, messagebox
-from crc import make_packet, verify_and_extract, ERROR_TOKEN
+from crc import make_packet, verify_and_extract, compute_crc3, ERROR_TOKEN
 
 SERVER_PORT = 1234
 
+
+def get_local_ip():
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.settimeout(0.5)
+        # doesn't actually send data; used to determine outbound interface
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        try:
+            return socket.gethostbyname(socket.gethostname())
+        except Exception:
+            return "127.0.0.1"
 
 def recv_all(sock, n):
     buf = b""
@@ -35,7 +50,10 @@ class ClientGUI:
         ttk.Label(top, text="Server IP:").pack(side=tk.LEFT)
         self.ip_entry = ttk.Entry(top, width=15)
         self.ip_entry.pack(side=tk.LEFT)
-        self.ip_entry.insert(0, "127.0.0.1")
+        self.ip_entry.insert(0, get_local_ip())
+
+        detect_btn = ttk.Button(top, text="Detect", command=self.detect_local_ip)
+        detect_btn.pack(side=tk.LEFT, padx=(6,0))
 
         ttk.Label(top, text="Name:").pack(side=tk.LEFT, padx=(10, 2))
         self.name_entry = ttk.Entry(top, width=12)
@@ -84,7 +102,9 @@ class ClientGUI:
             self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.sock.connect((ip, SERVER_PORT))
 
-            packet = make_packet(name)
+            payload = name.encode("utf-8")
+            crc = compute_crc3(payload)
+            packet = payload + bytes([crc])
             self.sock.sendall(struct.pack("!I", len(packet)) + packet)
 
             self.connected = True
@@ -97,7 +117,16 @@ class ClientGUI:
             messagebox.showerror("Connection Error", str(e))
 
     # --------------------------------------------------------------
-
+    def detect_local_ip(self):
+        ip = get_local_ip()
+        self.ip_entry.delete(0, tk.END)
+        self.ip_entry.insert(0, ip)
+        # use log if you want user feedback
+        try:
+            self.log(f"Detected local IP: {ip}")
+        except:
+            pass
+        
     def send_message(self):
         if not self.connected:
             return
@@ -133,8 +162,8 @@ class ClientGUI:
                 # Server requests resend
                 if valid and text == ERROR_TOKEN:
                     if self.last_message:
-                        resend = make_packet(self.last_message)
-                        self.sock.sendall(struct.pack("!I", len(resend)) + resend)
+                        packet = make_packet(self.last_message)
+                        self.sock.sendall(struct.pack("!I", len(packet)) + packet)
                     continue
 
                 # Clean broadcast message

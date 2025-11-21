@@ -10,7 +10,7 @@ import struct
 import queue
 import tkinter as tk
 from tkinter import ttk, scrolledtext
-from crc import make_packet, verify_and_extract, maybe_corrupt, ERROR_TOKEN
+from crc import make_packet, verify_and_extract, ERROR_TOKEN
 
 HOST = "0.0.0.0"
 PORT = 1234
@@ -151,7 +151,7 @@ def client_thread(sock, addr, gui: ServerGUI):
 
                 # NEW FEATURE: Broadcast corruption notice
                 gui.queue.put(("broadcast",
-                               f"[Server Notice] Received a corrupted message from {name}."))
+                               f"[Server Notice] Received a corrupted message from {name}. Resend requested."))
 
                 # Ask client to resend (ERROR_TOKEN never corrupted)
                 error_packet = make_packet(ERROR_TOKEN)
