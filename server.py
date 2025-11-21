@@ -1,13 +1,3 @@
-# server.py
-# --------------------------------------------------------------------
-# RELAY CHAT SERVER with:
-#  - Server can chat
-#  - Server sees all client chats
-#  - Client chats appear in server log
-#  - Join/leave announcements
-#  - CRC-based automatic resend
-#  - Broadcast corruption notices
-# --------------------------------------------------------------------
 
 import socket
 import threading
@@ -15,12 +5,13 @@ import struct
 import queue
 import tkinter as tk
 from tkinter import ttk, scrolledtext
-from crc import makePacket, verifyPacket, ERROR_TOKEN
+from crc import make_packet, verify_and_extract, ERROR_TOKEN
 
+#server listens on all interfaces at this port
 HOST = "0.0.0.0"
 PORT = 1234
 
-
+#reads exaclty n bytes from a blocking socket
 def recv_all(sock, n):
     """Receive exactly n bytes from socket."""
     buf = b""
@@ -31,10 +22,7 @@ def recv_all(sock, n):
         buf += part
     return buf
 
-
-# =====================================================================
-# GUI HANDLER
-# =====================================================================
+#creates gui layout
 class ServerGUI:
     def __init__(self, root):
         self.root = root
@@ -68,14 +56,13 @@ class ServerGUI:
         send_btn.pack(side=tk.LEFT, padx=6)
 
         # State: clients + queue
-        self.clients = {}
-        self.clients_lock = threading.Lock()
+        self.clients = {} #map sockets
+        self.clients_lock = threading.Lock() 
         self.queue = queue.Queue()
 
-        # Begin queue processor
+        # Begin queue processor;runs every 100ms
         self.root.after(100, self.process_queue)
 
-    # -----------------------------------------------------------
     def log_msg(self, text):
         """Display text in server log/chat window."""
         self.log.config(state="normal")
@@ -83,7 +70,6 @@ class ServerGUI:
         self.log.yview(tk.END)
         self.log.config(state="disabled")
 
-    # -----------------------------------------------------------
     def send_server_message(self):
         """Server sends a chat message."""
         msg = self.server_msg.get().strip()
@@ -95,7 +81,7 @@ class ServerGUI:
         self.broadcast(formatted)        # <-- send to all clients
         self.server_msg.delete(0, tk.END)
 
-    # -----------------------------------------------------------
+    #bridge between worker threads and GUI
     def process_queue(self):
         """Handle queued events from client threads."""
         while not self.queue.empty():
@@ -105,7 +91,6 @@ class ServerGUI:
                 self.log_msg(data)
 
             elif event == "client_chat":
-                # NEW FEATURE
                 # Show client chat messages in server chat window!
                 self.log_msg(data)
 
@@ -134,44 +119,38 @@ class ServerGUI:
 
         self.root.after(100, self.process_queue)
 
-    # -----------------------------------------------------------
     def broadcast(self, text):
         """Broadcast message to all clients."""
-        packet = makePacket(text)
+        packet = make_packet(text) #wraps text with crc
 
         with self.clients_lock:
             items = list(self.clients.items())
 
         for sock, _ in items:
             try:
+                #sends s4-byte length header,crc-secured packet
                 sock.sendall(struct.pack("!I", len(packet)) + packet)
             except:
                 pass
 
-
-# =====================================================================
-# PER-CLIENT THREAD
-# =====================================================================
+#every connected client runs its own thread
 def client_thread(sock, addr, gui: ServerGUI):
-
     try:
         # Receive client's NAME
         header = recv_all(sock, 4)
         if not header:
             return
-
+        #read packet
         (length,) = struct.unpack("!I", header)
         packet = recv_all(sock, length)
-
-        valid, name = verifyPacket(packet)
+        #verify crc,extract name
+        valid, name = verify_and_extract(packet)
         if not valid:
             name = "Unknown"
-
+        #server triggers
         gui.queue.put(("add_client", (sock, name)))
-
         # Broadcast enter
         gui.queue.put(("broadcast", f"{name} has entered the chat. Welcome!"))
-
         # Show enter in server GUI
         gui.queue.put(("client_chat", f"{name} has entered the chat. Welcome!"))
 
@@ -188,11 +167,9 @@ def client_thread(sock, addr, gui: ServerGUI):
             if not packet:
                 break
 
-            valid, text = verifyPacket(packet)
+            valid, text = verify_and_extract(packet)
 
-            # -----------------------------------------
-            # CORRUPTED MESSAGE
-            # -----------------------------------------
+            # handles corrupted messages
             if not valid:
                 gui.queue.put(("log", f"[Server Notice] Corrupted message from {name}"))
 
@@ -200,7 +177,7 @@ def client_thread(sock, addr, gui: ServerGUI):
                                f"[Server Notice] Received a corrupted message from {name}. Resend requested."))
 
                 # Ask sender to resend
-                err = makePacket(ERROR_TOKEN)
+                err = make_packet(ERROR_TOKEN)
                 try:
                     sock.sendall(struct.pack("!I", len(err)) + err)
                 except:
@@ -212,10 +189,7 @@ def client_thread(sock, addr, gui: ServerGUI):
             # Ignore ERROR_TOKEN
             if text == ERROR_TOKEN:
                 continue
-
-            # -----------------------------------------
             # CLEAN MESSAGE
-            # -----------------------------------------
             if last_request_resend:
                 gui.queue.put(("log", f"{name} resent successfully."))
                 last_request_resend = False
@@ -242,7 +216,6 @@ def client_thread(sock, addr, gui: ServerGUI):
         gui.queue.put(("client_chat", f"{name} has left the chat."))
 
 
-# =====================================================================
 def accept_loop(server_sock, gui):
     while True:
         client, addr = server_sock.accept()
