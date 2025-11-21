@@ -11,6 +11,20 @@ from crc import makePacket, verifyPacket, ERROR_TOKEN
 HOST = "0.0.0.0"
 PORT = 1234
 
+def getLocalIP():
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.settimeout(0.5)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        try:
+            return socket.gethostbyname(socket.gethostname())
+        except Exception:
+            return "127.0.0.1"
+            
 #reads exaclty n bytes from a blocking socket
 def recv_all(sock, n):
     """Receive exactly n bytes from socket."""
@@ -225,12 +239,13 @@ def accept_loop(server_sock, gui):
 def main():
     srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    bind_ip = getLocalIP()
     srv.bind((HOST, PORT))
     srv.listen(5)
 
     root = tk.Tk()
     gui = ServerGUI(root)
-    gui.log_msg(f"[Server Notice] Server running on {HOST}:{PORT}")
+    gui.log_msg(f"[Server Notice] Server running on {bind_ip}:{PORT}")
 
     threading.Thread(target=accept_loop, args=(srv, gui), daemon=True).start()
     root.mainloop()
