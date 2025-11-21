@@ -65,6 +65,8 @@ class ClientGUI:
         self.msg_entry = ttk.Entry(bottom)
         self.msg_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
+        self.msg_entry.bind("<Return>", lambda e: self.sendMessage())
+
         self.send_btn = ttk.Button(bottom, text="Send", command=self.sendMessage, state="disabled")
         self.send_btn.pack(side=tk.LEFT, padx=4)
 

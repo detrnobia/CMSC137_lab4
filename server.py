@@ -1,4 +1,3 @@
-
 import socket
 import threading
 import struct
@@ -66,6 +65,8 @@ class ServerGUI:
         self.server_msg = ttk.Entry(bottom)
         self.server_msg.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
+        self.server_msg.bind("<Return>", lambda e: self.send_server_message())
+        
         send_btn = ttk.Button(bottom, text="Send", command=self.send_server_message)
         send_btn.pack(side=tk.LEFT, padx=6)
 
