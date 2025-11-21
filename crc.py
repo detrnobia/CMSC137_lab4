@@ -1,10 +1,3 @@
-# crc.py
-# --------------------------------------------------------------------
-# CRC-3 using G(x) = x^3 + x + 1
-# Includes 10% corruption simulation for NORMAL CHAT MESSAGES ONLY.
-# __CRC_ERROR__ packets are NEVER corrupted to prevent protocol stalls.
-# --------------------------------------------------------------------
-
 import random
 
 POLY = 0b1011
@@ -24,10 +17,9 @@ def computeCRC(data: bytes, init=0):
     return crc & 0b111 
 
 
-def randomCorrupt(packet: bytes, text: str) -> bytes:
-    """Corrupt only NORMAL MESSAGES. NEVER corrupt ERROR_TOKEN."""
+def randomCorrupt(packet: bytes, text: str):
     if text == ERROR_TOKEN:
-        return packet  # NEVER corrupt control packets
+        return packet
 
     if random.random() < CORRUPTION_CHANCE and len(packet) > 0:
         idx = random.randrange(len(packet))
@@ -39,7 +31,7 @@ def randomCorrupt(packet: bytes, text: str) -> bytes:
     return packet
 
 
-def makePacket(text: str) -> bytes:
+def makePacket(text: str):
     payload = text.encode("utf-8")
     crc = computeCRC(payload)
     packet = payload + bytes([crc])

@@ -1,9 +1,3 @@
-# client.py
-# --------------------------------------------------------------------
-# Client automatically resends last message when server sends __CRC_ERROR__.
-# ERROR_TOKEN messages are NEVER corrupted, so resend is always triggered.
-# --------------------------------------------------------------------
-
 import socket
 import struct
 import threading
@@ -18,7 +12,6 @@ def getLocalIP():
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.settimeout(0.5)
-        # doesn't actually send data; used to determine outbound interface
         s.connect(("8.8.8.8", 80))
         ip = s.getsockname()[0]
         s.close()
@@ -28,6 +21,7 @@ def getLocalIP():
             return socket.gethostbyname(socket.gethostname())
         except Exception:
             return "127.0.0.1"
+
 
 def receiveAll(sock, n):
     buf = b""
@@ -86,7 +80,6 @@ class ClientGUI:
         self.chat.yview(tk.END)
         self.chat.config(state="disabled")
 
-    # --------------------------------------------------------------
 
     def connect(self):
         if self.connected:
@@ -116,12 +109,11 @@ class ClientGUI:
         except Exception as e:
             messagebox.showerror("Connection Error", str(e))
 
-    # --------------------------------------------------------------
+
     def detectLocalIP(self):
         ip = getLocalIP()
         self.ip_entry.delete(0, tk.END)
         self.ip_entry.insert(0, ip)
-        # use log if you want user feedback
         try:
             self.log(f"Detected local IP: {ip}")
         except:
@@ -143,7 +135,6 @@ class ClientGUI:
         except:
             self.connected = False
 
-    # --------------------------------------------------------------
 
     def receiveMessageLoop(self):
         try:
@@ -156,17 +147,17 @@ class ClientGUI:
                 packet = receiveAll(self.sock, length)
                 if not packet:
                     break
+                
 
                 valid, text = verifyPacket(packet)
 
-                # Server requests resend
                 if valid and text == ERROR_TOKEN:
                     if self.last_message:
                         packet = makePacket(self.last_message)
                         self.sock.sendall(struct.pack("!I", len(packet)) + packet)
                     continue
 
-                # Clean broadcast message
+
                 if valid:
                     self.log(text)
 
@@ -177,7 +168,6 @@ class ClientGUI:
             except:
                 pass
 
-    # --------------------------------------------------------------
 
     def on_close(self):
         try:
